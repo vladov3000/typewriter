@@ -1,0 +1,14 @@
+# Typewriter
+
+A minimal text editor. Supports character input and basic emacs shortcuts:
+ - Cmd f: move forward.
+ - Cmd b: move backward.
+ - Cmd p: move up.
+ - Cmd n: move down.
+ - Cmd +: zoom in.
+ - Cmd -: zoom out.
+
+There is a bug with the subpixel font aliasing that makes the edges of text
+rainbow. I am pretty sure I am rendering to the texture at the wrong scale,
+but this is tricky to fix because it messes up the math in other areas.
+ 

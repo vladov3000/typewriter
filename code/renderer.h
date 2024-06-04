@@ -1,12 +1,10 @@
-typedef struct {
-  F32 resolution[2];
-} Uniforms;
+// -*- mode: objc -*-
 
 typedef struct {
-  F32 position[2];
-  F32 size[2];
-  F32 color[4];
-} Sprite;
+  F32 resolution[2];
+  F32 scale;
+  U8  padding[4];
+} Uniforms;
 
 typedef struct {
   Semaphore     semaphore;
@@ -20,6 +18,8 @@ typedef struct {
   I64           sprite_limit;
   I64           sprite_count;
   Sprite*       sprites;
+  Atlas*        atlas;
+  F32           scale;
 } Renderer;
 
 static NSWindow* make_window() {
@@ -65,6 +65,9 @@ static void add_attributes(AttributeArray* attributes) {
   add_attribute(attributes[0], MTLVertexFormatFloat2, offsetof(Sprite, position));
   add_attribute(attributes[1], MTLVertexFormatFloat2, offsetof(Sprite, size));
   add_attribute(attributes[2], MTLVertexFormatFloat4, offsetof(Sprite, color));
+  add_attribute(attributes[3], MTLVertexFormatFloat,  offsetof(Sprite, tint));
+  add_attribute(attributes[4], MTLVertexFormatFloat2, offsetof(Sprite, uv));
+  add_attribute(attributes[5], MTLVertexFormatFloat2, offsetof(Sprite, uv_size));
 }
 
 static void add_layout(BufferLayout* layout) {
@@ -102,7 +105,7 @@ static Renderer* make_renderer(Arena* arena, App* app, int sprite_limit) {
   CAMetalLayer*  layer   = make_layer(device, window);
   NSView*        view    = make_view(window, layer);
 
-  Renderer* renderer      = arena_allocate(arena, Renderer);
+  Renderer* renderer       = arena_allocate(arena, Renderer);
   renderer->semaphore      = dispatch_semaphore_create(1);
   renderer->view           = view;
   renderer->layer          = layer;
@@ -114,11 +117,16 @@ static Renderer* make_renderer(Arena* arena, App* app, int sprite_limit) {
   renderer->sprite_count   = 0;
   renderer->sprite_buffer  = [device newBufferWithLength:sizeof(Sprite) * sprite_limit options:0];
   renderer->sprites        = [renderer->sprite_buffer contents];
+  renderer->atlas          = make_atlas(arena, device, [layer contentsScale], 2048, 2048);
+  renderer->scale          = 1;
   return renderer;
 }
 
 static void draw_start(Renderer* renderer) {
   dispatch_semaphore_wait(renderer->semaphore, DISPATCH_TIME_FOREVER);
+  renderer->atlas->next_x  = 0;
+  renderer->atlas->next_y  = renderer->atlas->height;
+  renderer->atlas->letters = NULL;
 }
 
 static void draw_sprite(Renderer* renderer, Sprite sprite) {
@@ -128,6 +136,14 @@ static void draw_sprite(Renderer* renderer, Sprite sprite) {
     renderer->sprites[sprite_count] = sprite;
     renderer->sprite_count++;
   }
+}
+
+static void draw_rectangle(Renderer* renderer, Rectangle rectangle, Color color) {
+  Sprite sprite = {};
+  memcpy(&sprite.position, &rectangle.position, sizeof sprite.position);
+  memcpy(&sprite.size,     &rectangle.size,     sizeof sprite.size);
+  sprite.tint   = 1;
+  draw_sprite(renderer, sprite);
 }
 
 static RenderPass* make_render_pass(id<MTLTexture> texture) {
@@ -149,9 +165,11 @@ static void draw_end(Renderer* renderer) {
   Uniforms*     uniforms       = renderer->uniforms;
   id<MTLBuffer> sprite_buffer  = renderer->sprite_buffer;
   I64           sprite_count   = renderer->sprite_count;
+  Atlas*        atlas          = renderer->atlas;
 
   uniforms->resolution[0] = view.frame.size.width;
   uniforms->resolution[1] = view.frame.size.height;
+  uniforms->scale         = renderer->scale;
   
   id<CAMetalDrawable> drawable = [layer nextDrawable];
   if (drawable == nil) {
@@ -165,6 +183,7 @@ static void draw_end(Renderer* renderer) {
   if (sprite_count > 0) {
     [encoder setVertexBuffer:sprite_buffer  offset:0 atIndex:0];
     [encoder setVertexBuffer:uniform_buffer offset:0 atIndex:1];
+    [encoder setFragmentTexture:atlas->texture atIndex:0];
     [encoder drawPrimitives:TRIANGLE_STRIP vertexStart:0 vertexCount:4 instanceCount:sprite_count];
   }
   [encoder endEncoding];
@@ -176,4 +195,8 @@ static void draw_end(Renderer* renderer) {
   [layer display];
 
   renderer->sprite_count = 0;
+}
+
+static void draw_font_atlas(Renderer* renderer) {
+  draw_sprite(renderer, (Sprite) { 0, 0, 1024, 1024, 1, 1, 1, 1, 0, 0, 0, 1, 1 });
 }

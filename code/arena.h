@@ -16,7 +16,7 @@ static void arena_initialize(Arena* arena, U64 size) {
 }
 
 static U64 align(U64 offset, U64 alignment) {
-  return (offset + alignment - 1) & (alignment - 1);
+  return (offset + alignment - 1) & ~(alignment - 1);
 }
 
 static U8* arena_allocate_bytes(Arena* arena, U64 bytes_size, U64 bytes_alignment) {
@@ -25,19 +25,30 @@ static U8* arena_allocate_bytes(Arena* arena, U64 bytes_size, U64 bytes_alignmen
   U64 used      = arena->used;
   U64 committed = arena->committed;
 
-  U64 aligned_size = align(size, bytes_alignment);
-  U64 new_size     = aligned_size + bytes_size;
-  U8* bytes        = &memory[aligned_size];
-  assert(new_size <= size);
+  U64 aligned_used = align(used, bytes_alignment);
+  U64 new_used     = aligned_used + bytes_size;
+  U8* bytes        = &memory[aligned_used];
+  assert(new_used <= size);
 
-  if (new_size > committed) {
-    U64 difference = align(new_size - committed, 4096);
+  if (new_used > committed) {
+    U64 difference = align(new_used - committed, 4096);
     I32 result     = mprotect(&memory[committed], difference, PROT_READ | PROT_WRITE);
     assert(result == 0);
+    arena->committed += difference;
   }
-  
+
+  arena->used = new_used;
+  return bytes;
+}
+
+static U8* arena_allocate_bytes_zeroed(Arena* arena, U64 bytes_size, U64 bytes_alignment) {
+  U8* bytes = arena_allocate_bytes(arena, bytes_size, bytes_alignment);
+  memset(bytes, 0, bytes_size);
   return bytes;
 }
 
 #define arena_allocate(arena, type) \
   ((type*) arena_allocate_bytes((arena), sizeof(type), _Alignof(type)))
+
+#define arena_allocate_zeroed(arena, type) \
+  ((type*) arena_allocate_bytes_zeroed((arena), sizeof(type), _Alignof(type)))
